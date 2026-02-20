@@ -1,93 +1,147 @@
-// --- Background Removal Logic ---
-async function removeBackground() {
-    const fileInput = document.getElementById('file-input');
-    const loader = document.getElementById('loader');
-    const uploadBox = document.getElementById('upload-box');
-    const resultArea = document.getElementById('result-area');
-    const outputImg = document.getElementById('output-img');
-    const downloadBtn = document.getElementById('download-btn');
+let currentMode = 'ocr';
+const chatWindow = document.getElementById('chat-window');
+const fileInput = document.getElementById('file-input');
+const loaderSpinner = document.getElementById('loader-spinner');
 
-    if (fileInput.files.length === 0) return;
+// --- ১. টুল সিলেকশন ---
+function triggerInput(mode) {
+    currentMode = mode;
+    fileInput.click();
+}
 
-    const imageFile = fileInput.files[0];
-    loader.classList.remove('hidden');
+// --- ২. মেইন প্রসেসিং হ্যান্ডলার ---
+fileInput.onchange = async function() {
+    if (this.files.length === 0) return;
+    const file = this.files[0];
+    const url = URL.createObjectURL(file);
+    
+    appendMessage('user', `<img src="${url}" class="rounded-2xl max-w-sm shadow-xl border border-white/10">`);
+    
+    // লাইভ প্রসেসিং ইন্ডিকেটর (Reload Animation)
+    const procId = "ai-proc-" + Date.now();
+    appendMessage('ai', `
+        <div id="${procId}" class="flex items-center gap-3">
+            <div class="w-4 h-4 border-2 border-cyan-500/10 border-t-cyan-500 rounded-full animate-spin"></div>
+            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-500 animate-pulse">AI Engine Processing...</p>
+        </div>
+    `);
+
+    loaderSpinner.classList.remove('hidden');
 
     try {
-        // ব্রাউজার বেজড আনলিমিটেড ইঞ্জিন
-        const blob = await imglyRemoveBackground(imageFile, {
-            publicPath: "https://cdn.jsdelivr.net/npm/@imgly/background-removal@latest/dist/",
-            model: "medium"
-        });
-        
-        const url = URL.createObjectURL(blob);
-        outputImg.src = url;
-        downloadBtn.href = url;
-        downloadBtn.download = `Siyam_Clean_${Date.now()}.png`;
-
-        uploadBox.classList.add('hidden');
-        resultArea.classList.remove('hidden');
-    } catch (error) {
-        alert("ইঞ্জিন লোড হতে সমস্যা হয়েছে। আবার চেষ্টা করুন।");
+        if (currentMode === 'ocr') {
+            await runOCR(file, procId);
+        } else {
+            await runBGRemoval(file, procId);
+        }
+    } catch (e) {
+        document.getElementById(procId).innerHTML = `<span class="text-red-500 text-[10px] uppercase font-bold">Error: Connection Failed</span>`;
+        showToast("Processing failed!", "error");
     } finally {
-        loader.classList.add('hidden');
+        loaderSpinner.classList.add('hidden');
+        this.value = '';
+    }
+};
+
+// --- ৩. OCR Engine ---
+async function runOCR(file, procId) {
+    const worker = await Tesseract.createWorker();
+    await worker.loadLanguage('ben+eng');
+    await worker.initialize('ben+eng');
+    const { data: { text } } = await worker.recognize(file);
+    await worker.terminate();
+
+    document.getElementById(procId).closest('.animate-up').remove(); // প্রসেসিং মেসেজ রিমুভ
+
+    if (text.trim()) {
+        appendMessage('ai', `
+            <div class="space-y-4">
+                <p class="text-[9px] text-cyan-500 font-black tracking-[0.3em] uppercase opacity-40">Extracted Content</p>
+                <p class="text-[15px] leading-relaxed text-white/95 whitespace-pre-line">${text.trim()}</p>
+                <button onclick="copyText(this)" class="bg-white/5 border border-white/10 px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-cyan-600 transition-all">Copy Text</button>
+            </div>
+        `);
+    } else {
+        showToast("No text found in image!", "error");
     }
 }
 
-// --- Premium Share Panel System ---
-function shareApp() {
-    const appUrl = window.location.href;
-    const shareOverlay = document.createElement('div');
-    shareOverlay.id = 'share-popup';
-    shareOverlay.className = "fixed inset-0 z-[5000] bg-black/80 backdrop-blur-sm flex items-end justify-center animate-fade";
-    
-    shareOverlay.innerHTML = `
-        <div class="w-full max-w-md bg-[#111] border-t border-white/10 rounded-t-[40px] p-8 pb-12 animate-up">
-            <div class="w-12 h-1.5 bg-white/10 rounded-full mx-auto mb-8"></div>
-            <h3 class="text-[10px] font-black uppercase tracking-[0.3em] text-center mb-8 text-white/50">Spread the Word</h3>
+// --- ৪. BG Removal Engine ---
+async function runBGRemoval(file, procId) {
+    const config = {
+        publicPath: "https://cdn.jsdelivr.net/npm/@imgly/background-removal@latest/dist/",
+        model: "medium"
+    };
+    const blob = await imglyRemoveBackground(file, config);
+    const resultUrl = URL.createObjectURL(blob);
 
-            <div class="bg-black p-2 pl-5 rounded-2xl flex items-center justify-between mb-8 border border-white/5">
-                <p class="text-[10px] text-white/30 truncate mr-4 italic">${appUrl}</p>
-                <button onclick="copyLink('${appUrl}', this)" class="bg-cyan-600 px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95">
-                    Copy Link
-                </button>
+    document.getElementById(procId).closest('.animate-up').remove(); // প্রসেসিং মেসেজ রিমুভ
+
+    appendMessage('ai', `
+        <div class="space-y-4">
+            <p class="text-[9px] text-green-500 font-black tracking-[0.3em] uppercase opacity-40">Background Cleared</p>
+            <div class="bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] rounded-3xl border border-white/5 overflow-hidden">
+                <img src="${resultUrl}" class="w-full h-auto">
             </div>
-
-            <div class="grid grid-cols-4 gap-4">
-                <a href="https://wa.me/?text=Check this Unlimited AI BG Remover: ${appUrl}" target="_blank" class="flex flex-col items-center gap-3">
-                    <div class="w-14 h-14 bg-green-500/10 rounded-2xl flex items-center justify-center text-green-500"><i class="fa-brands fa-whatsapp text-2xl"></i></div>
-                    <span class="text-[8px] font-bold uppercase opacity-40">WhatsApp</span>
-                </a>
-                <a href="https://www.facebook.com/sharer/sharer.php?u=${appUrl}" target="_blank" class="flex flex-col items-center gap-3">
-                    <div class="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center text-blue-600"><i class="fa-brands fa-facebook-f text-xl"></i></div>
-                    <span class="text-[8px] font-bold uppercase opacity-40">Facebook</span>
-                </a>
-                <a href="https://t.me/share/url?url=${appUrl}" target="_blank" class="flex flex-col items-center gap-3">
-                    <div class="w-14 h-14 bg-sky-500/10 rounded-2xl flex items-center justify-center text-sky-500"><i class="fa-brands fa-telegram text-xl"></i></div>
-                    <span class="text-[8px] font-bold uppercase opacity-40">Telegram</span>
-                </a>
-                <button onclick="systemShare('${appUrl}')" class="flex flex-col items-center gap-3">
-                    <div class="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-white"><i class="fa-solid fa-ellipsis text-xl"></i></div>
-                    <span class="text-[8px] font-bold uppercase opacity-40">More</span>
-                </button>
-            </div>
-
-            <button onclick="document.getElementById('share-popup').remove()" class="w-full mt-10 text-[9px] font-bold uppercase tracking-[0.4em] text-white/20">Close Panel</button>
+            <a href="${resultUrl}" download="SiyamAI_${Date.now()}.png" class="flex items-center justify-center gap-3 w-full bg-green-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-lg shadow-green-600/20 active:scale-95 transition-all">
+                <i class="fa-solid fa-download text-sm"></i> Download PNG
+            </a>
         </div>
-    `;
-    document.body.appendChild(shareOverlay);
+    `);
 }
 
-function copyLink(url, btn) {
-    navigator.clipboard.writeText(url);
-    const oldText = btn.innerText;
-    btn.innerText = "DONE!";
-    btn.className = btn.className.replace('bg-cyan-600', 'bg-green-600');
-    setTimeout(() => {
-        btn.innerText = oldText;
-        btn.className = btn.className.replace('bg-green-600', 'bg-cyan-600');
-    }, 2000);
+// --- ৫. হেল্পার ফাংশনস ---
+function appendMessage(sender, content) {
+    const div = document.createElement('div');
+    div.className = sender === 'user' ? "flex flex-col items-end animate-up ml-auto" : "flex flex-col items-start animate-up mr-auto";
+    div.innerHTML = `<div class="${sender === 'user' ? 'bg-cyan-600' : 'bg-[#111] border border-white/5'} p-4 rounded-[28px] ${sender === 'user' ? 'rounded-tr-none' : 'rounded-tl-none'} max-w-[95%] shadow-2xl">${content}</div>`;
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
-function systemShare(url) {
-    if (navigator.share) navigator.share({ title: 'Siyam Clean AI', url: url });
+function showToast(msg, type) {
+    const toast = document.getElementById('custom-toast');
+    const msgEl = document.getElementById('toast-msg');
+    const iconEl = document.getElementById('toast-icon');
+    
+    msgEl.innerText = msg;
+    iconEl.innerHTML = type === 'success' ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-xmark"></i>';
+    iconEl.className = type === 'success' ? "w-10 h-10 rounded-full flex items-center justify-center bg-green-500/10 text-green-500 text-lg" : "w-10 h-10 rounded-full flex items-center justify-center bg-red-500/10 text-red-500 text-lg";
+
+    toast.classList.remove('opacity-0', 'scale-90');
+    toast.classList.add('opacity-100', 'scale-100');
+    setTimeout(() => { toast.classList.add('opacity-0', 'scale-90'); }, 3000);
 }
+
+function copyText(btn) {
+    const text = btn.previousElementSibling.innerText;
+    navigator.clipboard.writeText(text);
+    showToast("Text copied to clipboard", "success");
+}
+
+// --- ৬. PWA & Back Button System ---
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    document.getElementById('install-banner').classList.remove('hidden');
+});
+
+document.getElementById('install-button').onclick = async () => {
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt = null;
+        document.getElementById('install-banner').classList.add('hidden');
+    }
+};
+
+function refreshApp() {
+    if(confirm("Refresh Siyam AI?")) location.reload();
+}
+
+// Back Button Fix
+window.history.pushState({ page: 1 }, "", "");
+window.onpopstate = function() {
+    if(confirm("Exit App?")) window.history.back();
+    else window.history.pushState({ page: 1 }, "", "");
+};
